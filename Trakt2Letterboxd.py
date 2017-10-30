@@ -175,7 +175,8 @@ def write_csv(history, filename):
         with open(filename, 'wb') as fil:
             writer = csv.DictWriter(fil, history[0].keys())
             writer.writeheader()
-            writer.writerows(history)
+            for row in history:
+                writer.writerow({k:v.encode('utf8') for k,v in row.items()})
         return True
 
     return False
