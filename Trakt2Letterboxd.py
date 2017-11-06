@@ -165,7 +165,7 @@ class TraktImporter(object):
             'WatchedDate': x['watched_at'],
             'tmdbID': x['movie']['ids']['tmdb'],
             'imdbID': x['movie']['ids']['imdb'],
-            'Title': x['movie']['title'],
+            'Title': x['movie']['title'].encode('utf8'),
             'Year': x['movie']['year'],
             } for x in movies]
 
@@ -175,8 +175,7 @@ def write_csv(history, filename):
         with open(filename, 'wb') as fil:
             writer = csv.DictWriter(fil, history[0].keys())
             writer.writeheader()
-            for row in history:
-                writer.writerow({k:v.encode('utf8') for k,v in row.items()})
+            writer.writerows(history)
         return True
 
     return False
