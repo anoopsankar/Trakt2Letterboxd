@@ -123,9 +123,9 @@ class TraktImporter(object):
         # Errored.
         return False
 
-    def get_movie_history(self):
-        """ Get movie watch history of the user. """
-        print "Getting history"
+    def get_movie_list(self, list_name):
+        """ Get movie list of the user. """
+        print "Getting " + list_name
         headers = {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer ' + self.api_token,
@@ -138,7 +138,7 @@ class TraktImporter(object):
         page = 1
 
         while page <= page_limit:
-            request = Request(self.api_root + '/sync/history/movies?page={0}&limit=10'.format(page),
+            request = Request(self.api_root + '/sync/' + list_name + '/movies?page={0}&limit=10'.format(page),
                               headers=headers)
             try:
                 response = urlopen(request)
@@ -162,7 +162,7 @@ class TraktImporter(object):
     @staticmethod
     def __extract_fields(movies):
         return [{
-            'WatchedDate': x['watched_at'],
+            'WatchedDate': x['watched_at'] if ('watched_at' in x) else '',
             'tmdbID': x['movie']['ids']['tmdb'],
             'imdbID': x['movie']['ids']['imdb'],
             'Title': x['movie']['title'].encode('utf8'),
@@ -187,9 +187,15 @@ def run():
 
     importer = TraktImporter()
     if importer.authenticate():
-        history = importer.get_movie_history()
-        if write_csv(history, "trakt-exported.csv"):
-            print "\nYour history has been exported and saved to the file 'trakt-exported.csv'."
+        history = importer.get_movie_list('history')
+        watchlist = importer.get_movie_list('watchlist')
+        if write_csv(history, "trakt-exported-history.csv"):
+            print "\nYour history has been exported and saved to the file 'trakt-exported-history.csv'."
+        else:
+            print "\nEmpty results, nothing to generate."
+
+        if write_csv(watchlist, "trakt-exported-watchlist.csv"):
+            print "\nYour watchlist has been exported and saved to the file 'trakt-exported-watchlist.csv'."
         else:
             print "\nEmpty results, nothing to generate."
 
