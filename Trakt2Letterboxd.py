@@ -130,6 +130,8 @@ class TraktImporter(object):
         page_limit = 1
         page = 1
 
+        ratings = self.get_ratings()
+
         while page <= page_limit:
             request = Request(self.api_root + '/sync/' + list_name + '/movies?page={0}&limit=10'.format(page),
                               headers=headers)
@@ -142,7 +144,7 @@ class TraktImporter(object):
 
                 response_body = response.read()
                 if response_body:
-                    extracted_movies.extend(self.__extract_fields(json.loads(response_body)))
+                    extracted_movies.extend(self.__extract_fields(json.loads(response_body), ratings))
             except HTTPError as err:
                 if err.code == 401 or err.code == 403:
                     print("Auth Token has expired.")
@@ -152,14 +154,54 @@ class TraktImporter(object):
 
         return extracted_movies
 
+    def get_ratings(self):
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + self.api_token,
+            'trakt-api-version': '2',
+            'trakt-api-key': self.api_clid
+        }
+
+        request = Request(self.api_root + '/sync/ratings/movies', headers=headers)
+
+        try:
+            response = urlopen(request)
+            response_body = response.read()
+
+            if response_body:
+                return [
+                    {
+                        'rating': rating['rating'], 
+                        'imdb': rating['movie']['ids']['imdb'], 
+                        'trakt': rating['movie']['ids']['trakt'], 
+                        'tmdb': rating['movie']['ids']['tmdb'], 
+                        'slug': rating['movie']['ids']['slug'], 
+                    } for rating in json.loads(response_body)]
+        except HTTPError as err:
+            if err.code == 401 or err.code == 403:
+                print("Auth Token has expired.")
+                self.__delete_token_cache()
+
+            print("{0} An error occured. Please re-run the script".format(err.code))
+            quit()
+
     @staticmethod
-    def __extract_fields(movies):
+    def __get_rating(ratings, ids):
+        for rating in ratings:
+            if ids['imdb'] == rating['imdb'] or ids['trakt'] == rating['trakt'] or ids['tmdb'] == rating['tmdb'] or ids['slug'] == rating['slug']:
+                return rating['rating']
+
+        return ''
+
+    @staticmethod
+    def __extract_fields(movies, ratings):
         return [{
             'WatchedDate': x['watched_at'] if ('watched_at' in x) else '',
             'tmdbID': x['movie']['ids']['tmdb'],
             'imdbID': x['movie']['ids']['imdb'],
             'Title': x['movie']['title'],
             'Year': x['movie']['year'],
+            'Rating10': TraktImporter.__get_rating(ratings, x['movie']['ids'])
             } for x in movies]
 
 def write_csv(history, filename):
