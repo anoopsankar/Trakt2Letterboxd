@@ -116,9 +116,8 @@ class TraktImporter(object):
         # Errored.
         return False
 
-    def get_movie_list(self, list_name):
-        """ Get movie list of the user. """
-        print("Getting " + list_name)
+    def __make_api_request(self, endpoint, extractor_func, description):
+        """ Generic method to make paginated API requests """
         headers = {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer ' + self.api_token,
@@ -126,23 +125,22 @@ class TraktImporter(object):
             'trakt-api-key': self.api_clid
         }
 
-        extracted_movies = []
+        extracted_data = []
         page_limit = 1
         page = 1
 
         while page <= page_limit:
-            request = Request(self.api_root + '/sync/' + list_name + '/movies?page={0}&limit=10'.format(page),
-                              headers=headers)
+            request = Request(self.api_root + endpoint.format(page=page), headers=headers)
             try:
                 response = urlopen(request)
 
                 page_limit = int(response.info()['X-Pagination-Page-Count'])
-                print("Completed page {0} of {1}".format(page, page_limit))
+                print("Completed {0} page {1} of {2}".format(description, page, page_limit))
                 page = page + 1
 
                 response_body = response.read()
                 if response_body:
-                    extracted_movies.extend(self.__extract_fields(json.loads(response_body)))
+                    extracted_data.extend(extractor_func(json.loads(response_body)))
             except HTTPError as err:
                 if err.code == 401 or err.code == 403:
                     print("Auth Token has expired.")
@@ -150,7 +148,50 @@ class TraktImporter(object):
                 print("{0} An error occured. Please re-run the script".format(err.code))
                 quit()
 
+        return extracted_data
+
+    def get_movie_list(self, list_name, include_ratings=False):
+        print("Getting " + list_name + (" with ratings" if include_ratings else ""))
+
+        endpoint = '/sync/{0}/movies?page={{page}}&limit=10'.format(list_name)
+        extracted_movies = self.__make_api_request(endpoint, self.__extract_fields, list_name)
+
+        if include_ratings and extracted_movies:
+            print("Fetching ratings data...")
+            ratings = self.__get_ratings()
+            extracted_movies = self.__merge_ratings_with_movies(extracted_movies, ratings)
+
         return extracted_movies
+
+    def __get_ratings(self):
+        endpoint = '/sync/ratings/movies?page={{page}}&limit=10'
+        return self.__make_api_request(endpoint, self.__extract_rating_fields, "ratings")
+
+    def __merge_ratings_with_movies(self, movies, ratings):
+        ratings_lookup = {}
+        for rating in ratings:
+            tmdb_id = rating['tmdbID']
+            if tmdb_id:
+                ratings_lookup[tmdb_id] = rating
+
+        for movie in movies:
+            tmdb_id = movie['tmdbID']
+            if tmdb_id in ratings_lookup:
+                movie['Rating10'] = ratings_lookup[tmdb_id]['Rating10']
+            else:
+                movie['Rating10'] = ''
+
+        return movies
+
+    @staticmethod
+    def __extract_rating_fields(ratings):
+        return [{
+            'Rating10': x['rating'],
+            'tmdbID': x['movie']['ids']['tmdb'],
+            'imdbID': x['movie']['ids']['imdb'],
+            'Title': x['movie']['title'],
+            'Year': x['movie']['year'],
+            } for x in ratings]
 
     @staticmethod
     def __extract_fields(movies):
@@ -160,7 +201,7 @@ class TraktImporter(object):
             'imdbID': x['movie']['ids']['imdb'],
             'Title': x['movie']['title'],
             'Year': x['movie']['year'],
-            } for x in movies]
+        } for x in movies]
 
 def write_csv(history, filename):
     """ Write Letterboxd format CSV """
@@ -180,7 +221,7 @@ def run():
 
     importer = TraktImporter()
     if importer.authenticate():
-        history = importer.get_movie_list('history')
+        history = importer.get_movie_list('history', include_ratings=True)
         watchlist = importer.get_movie_list('watchlist')
         if write_csv(history, "trakt-exported-history.csv"):
             print("\nYour history has been exported and saved to the file 'trakt-exported-history.csv'.")
