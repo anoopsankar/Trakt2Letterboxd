@@ -15,6 +15,7 @@ class TraktImporter(object):
         self.api_clid = 'b04da548cc9df60510eac7ec1845ab98cebd8008a9978804a981bff7e73ab270'
         self.api_clsc = 'a880315fba01a5e5f0ad7de12b7872e36826a9359b2f419122a24dee1b2cb600'
         self.api_token = None
+        self.api_refresh_token = None
         self.api_headers = { 'Content-Type': 'application/json' }
 
 
@@ -34,6 +35,7 @@ class TraktImporter(object):
 
         if got_token:
             self.__encache_token()
+            time.sleep(2)  # Give Trakt time to register the new token
             return True
 
         return False
@@ -43,18 +45,54 @@ class TraktImporter(object):
             return False
 
         token_file = open("t_token", 'r')
-        self.api_token = token_file.read()
+        token_data = json.loads(token_file.read())
         token_file.close()
+        self.api_token = token_data.get('access_token')
+        self.api_refresh_token = token_data.get('refresh_token')
         return True
 
     def __encache_token(self):
+        token_data = {
+            'access_token': self.api_token,
+            'refresh_token': self.api_refresh_token
+        }
         token_file = open("t_token", 'w')
-        token_file.write(self.api_token)
+        token_file.write(json.dumps(token_data))
         token_file.close()
 
     @staticmethod
     def __delete_token_cache():
         os.remove("t_token")
+
+    def __refresh_token(self):
+        """ Refreshes the access token using the refresh token """
+        if not self.api_refresh_token:
+            return False
+        
+        url = self.api_root + '/oauth/token'
+        data = """{{ "refresh_token": "{0}",
+                     "client_id":     "{1}",
+                     "client_secret": "{2}",
+                     "redirect_uri":  "urn:ietf:wg:oauth:2.0:oob",
+                     "grant_type":    "refresh_token" }}
+                       """.format(self.api_refresh_token, self.api_clid, self.api_clsc).encode('utf8')
+
+        request = Request(url, data, self.api_headers)
+
+        try:
+            response_body = urlopen(request).read()
+            response_dict = json.loads(response_body)
+            if response_dict and 'access_token' in response_dict:
+                self.api_token = response_dict['access_token']
+                self.api_refresh_token = response_dict.get('refresh_token', self.api_refresh_token)
+                self.__encache_token()
+                print("\nToken refreshed.")
+                return True
+        except Exception as e:
+            print(f"\nFailed to refresh token: {e}")
+            return False
+        
+        return False
 
     def __generate_device_code(self):
         """ Generates a device code for authentication within Trakt. """
@@ -110,6 +148,7 @@ class TraktImporter(object):
             if response_dict and 'access_token' in response_dict:
                 print("Authenticated!")
                 self.api_token = response_dict['access_token']
+                self.api_refresh_token = response_dict.get('refresh_token')
                 print("Token:" + self.api_token)
                 return True
 
@@ -119,18 +158,18 @@ class TraktImporter(object):
     def get_movie_list(self, list_name):
         """ Get movie list of the user. """
         print("Getting " + list_name)
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + self.api_token,
-            'trakt-api-version': '2',
-            'trakt-api-key': self.api_clid
-        }
-
         extracted_movies = []
         page_limit = 1
         page = 1
 
         while page <= page_limit:
+            headers = {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + self.api_token,
+                'trakt-api-version': '2',
+                'trakt-api-key': self.api_clid
+            }
+            
             request = Request(self.api_root + '/sync/' + list_name + '/movies?page={0}&limit=10'.format(page),
                               headers=headers)
             try:
@@ -138,17 +177,26 @@ class TraktImporter(object):
 
                 page_limit = int(response.info()['X-Pagination-Page-Count'])
                 print("Completed page {0} of {1}".format(page, page_limit))
-                page = page + 1
 
                 response_body = response.read()
                 if response_body:
                     extracted_movies.extend(self.__extract_fields(json.loads(response_body)))
+                
+                page = page + 1
+                time.sleep(0.5)  # Small delay between pages to avoid rate limiting
             except HTTPError as err:
                 if err.code == 401 or err.code == 403:
-                    print("Auth Token has expired.")
-                    self.__delete_token_cache() # This will regenerate token on next run.
-                print("{0} An error occured. Please re-run the script".format(err.code))
-                quit()
+                    print("Auth Token expired, attempting to refresh...")
+                    if self.__refresh_token():
+                        print("Retrying page {0}...".format(page))
+                        continue  # Retry the same page with new token
+                    else:
+                        print("Failed to refresh token. Please re-run the script")
+                        self.__delete_token_cache()
+                        quit()
+                else:
+                    print("{0} An error occured. Error details: {1}".format(err.code, err.read().decode('utf-8')))
+                    quit()
 
         return extracted_movies
 
