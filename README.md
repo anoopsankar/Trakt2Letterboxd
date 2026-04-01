@@ -1,3 +1,5 @@
+## NOTE: Trakt made some significant breaking changes to their API recently; so the script does not work any more. I'm out of time to fix this at the moment, so there's no ETA for a fix yet unfortunately.
+
 # Trakt2Letterboxd
 This is a simple cross-platform script to export your movies in Trakt to Letterboxd.
 
