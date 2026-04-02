@@ -15,7 +15,11 @@ class TraktImporter(object):
         self.api_clid = 'b04da548cc9df60510eac7ec1845ab98cebd8008a9978804a981bff7e73ab270'
         self.api_clsc = 'a880315fba01a5e5f0ad7de12b7872e36826a9359b2f419122a24dee1b2cb600'
         self.api_token = None
-        self.api_headers = { 'Content-Type': 'application/json' }
+        self.api_refresh_token = None
+        self.api_headers = {
+            'Content-Type': 'application/json',
+            'User-Agent': 'Trakt2Letterboxd/1.0'
+        }
 
 
     def authenticate(self):
@@ -42,19 +46,53 @@ class TraktImporter(object):
         if not os.path.isfile("t_token"):
             return False
 
-        token_file = open("t_token", 'r')
-        self.api_token = token_file.read()
-        token_file.close()
-        return True
+        try:
+            with open("t_token", 'r') as token_file:
+                cache = json.load(token_file)
+            self.api_token = cache['access_token']
+            self.api_refresh_token = cache['refresh_token']
+            if time.time() >= cache['expires_at']:
+                return self.__refresh_token()
+            return True
+        except (KeyError, ValueError):
+            self.__delete_token_cache()
+            return False
 
     def __encache_token(self):
-        token_file = open("t_token", 'w')
-        token_file.write(self.api_token)
-        token_file.close()
+        cache = {
+            'access_token': self.api_token,
+            'refresh_token': self.api_refresh_token,
+            'expires_at': time.time() + (7 * 24 * 60 * 60)
+        }
+        with open("t_token", 'w') as token_file:
+            json.dump(cache, token_file)
 
     @staticmethod
     def __delete_token_cache():
         os.remove("t_token")
+
+    def __refresh_token(self):
+        """ Refreshes the access token using the stored refresh token. """
+        url = self.api_root + '/oauth/token'
+        data = json.dumps({
+            'refresh_token': self.api_refresh_token,
+            'client_id': self.api_clid,
+            'client_secret': self.api_clsc,
+            'redirect_uri': 'urn:ietf:wg:oauth:2.0:oob',
+            'grant_type': 'refresh_token'
+        }).encode('utf8')
+
+        try:
+            request = Request(url, data, self.api_headers)
+            response_body = urlopen(request).read()
+            response_dict = json.loads(response_body)
+            self.api_token = response_dict['access_token']
+            self.api_refresh_token = response_dict['refresh_token']
+            self.__encache_token()
+            return True
+        except (HTTPError, KeyError):
+            self.__delete_token_cache()
+            return False
 
     def __generate_device_code(self):
         """ Generates a device code for authentication within Trakt. """
@@ -78,29 +116,44 @@ class TraktImporter(object):
     def __poll_for_auth(self, device_code, interval, expiry):
         """ Polls for authorization token """
         url = self.api_root + '/oauth/device/token'
-        data = """{{ "code":          "{0}",
-                     "client_id":     "{1}",
-                     "client_secret": "{2}" }}
-                       """.format(device_code, self.api_clid, self.api_clsc).encode('utf8')
-
-        request = Request(url, data, self.api_headers)
+        data = json.dumps({
+            'code': device_code,
+            'client_id': self.api_clid,
+            'client_secret': self.api_clsc
+        }).encode('utf8')
 
         response_body = ""
         should_stop = False
 
-        print("Waiting for authorization.", end=' ')
+        print("Waiting for authorization.", end=' ', flush=True)
 
         while not should_stop:
             time.sleep(interval)
 
             try:
+                request = Request(url, data, self.api_headers)
                 response_body = urlopen(request).read()
                 should_stop = True
             except HTTPError as err:
                 if err.code == 400:
-                    print(".", end=' ')
+                    print(".", end=' ', flush=True)
+                elif err.code == 429:
+                    interval += 1
+                    print(".", end=' ', flush=True)
+                elif err.code == 404:
+                    print("\nInvalid device code. Please re-run the script.")
+                    should_stop = True
+                elif err.code == 409:
+                    print("\nCode already used. Please re-run the script.")
+                    should_stop = True
+                elif err.code == 410:
+                    print("\nCode expired. Please re-run the script.")
+                    should_stop = True
+                elif err.code == 418:
+                    print("\nAuthorization denied. Please re-run the script.")
+                    should_stop = True
                 else:
-                    print("\n{0} : Authorization failed, please try again. Script will now quit.".format(err.code))
+                    print("\n{0}: Authorization failed. Please re-run the script.".format(err.code))
                     should_stop = True
 
             should_stop = should_stop or (time.time() > expiry)
@@ -108,12 +161,11 @@ class TraktImporter(object):
         if response_body:
             response_dict = json.loads(response_body)
             if response_dict and 'access_token' in response_dict:
-                print("Authenticated!")
+                print("\nAuthenticated!")
                 self.api_token = response_dict['access_token']
-                print("Token:" + self.api_token)
+                self.api_refresh_token = response_dict['refresh_token']
                 return True
 
-        # Errored.
         return False
 
     def get_movie_list(self, list_name):
@@ -121,6 +173,7 @@ class TraktImporter(object):
         print("Getting " + list_name)
         headers = {
             'Content-Type': 'application/json',
+            'User-Agent': 'Trakt2Letterboxd/1.0',
             'Authorization': 'Bearer ' + self.api_token,
             'trakt-api-version': '2',
             'trakt-api-key': self.api_clid
@@ -145,9 +198,12 @@ class TraktImporter(object):
                     extracted_movies.extend(self.__extract_fields(json.loads(response_body)))
             except HTTPError as err:
                 if err.code == 401 or err.code == 403:
-                    print("Auth Token has expired.")
-                    self.__delete_token_cache() # This will regenerate token on next run.
-                print("{0} An error occured. Please re-run the script".format(err.code))
+                    print("Access token expired, attempting to refresh...")
+                    if self.__refresh_token():
+                        headers['Authorization'] = 'Bearer ' + self.api_token
+                        continue
+                    self.__delete_token_cache()
+                print("{0}: An error occurred. Please re-run the script.".format(err.code))
                 quit()
 
         return extracted_movies

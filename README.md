@@ -1,12 +1,46 @@
-## NOTE: Trakt made some significant breaking changes to their API recently; so the script does not work any more. I'm out of time to fix this at the moment, so there's no ETA for a fix yet unfortunately.
 
 # Trakt2Letterboxd
-This is a simple cross-platform script to export your movies in Trakt to Letterboxd.
+This is a simple cross-platform script to export your movies from Trakt to Letterboxd.
 
-You require Python 3.x installed for this to run. To install Python please follow the instructions at the [official Python website](https://www.python.org/downloads/).<sup>1</sup>
+## What you'll need
 
-To use run `python3 Trakt2Letterboxd.py` on your terminal. This will generate two csv files in the format required by Letterboxd. One titled 'trakt-exported-history.csv' (for movies you've seen) and one titled 'trakt-exported-watchlist.csv' (for movies you want to watch). You can import these files directly into the Letterboxd interface.
+- **Python 3.x** — if you don't have it, download and install it from the [official Python website](https://www.python.org/downloads/). The default options during installation are fine.
+- The **Trakt2Letterboxd.py** file — download it from this page by clicking the green **Code** button above, then **Download ZIP**, and unzip it somewhere easy to find like your Desktop.
 
-If you need more help running python scripts; please check these guides for your operating systems: [Windows](https://docs.python.org/3/faq/windows.html) and [MacOS](https://docs.python.org/3/using/mac.html). (Guys on Linux, you should already know what you're doing!). If you need more in-depth details please check this [guide](https://realpython.com/run-python-scripts/). If nothing works, please feel free to raise a github issue and I will try my best to guide you.
+## How to run it
 
-<sup>1</sup> If you want a Python2.x version, please checkout the `python2.7` branch in the repo. This branch is no longer supported.
+1. Open your terminal (on Mac, search for **Terminal** in Spotlight; on Windows, search for **Command Prompt**).
+2. Navigate to the folder where you put the script. For example, if it's on your Desktop:
+   - **Mac:** `cd ~/Desktop/Trakt2Letterboxd`
+   - **Windows:** `cd %USERPROFILE%\Desktop\Trakt2Letterboxd`
+3. Run the script with: `python3 Trakt2Letterboxd.py`
+
+## Connecting your Trakt account
+
+The first time you run the script, it will ask you to connect your Trakt account. It will print a URL and a short code, something like this:
+
+```
+Go to https://trakt.tv/activate on your web browser and enter the below user code there:
+
+ABCD1234
+```
+
+Just open that URL in your browser, enter the code shown, and approve the connection. Come back to the terminal and the script will continue automatically.
+
+Your login is saved locally so you won't need to do this every time.
+
+## What you get
+
+Two CSV files will be created in the same folder as the script:
+
+- **trakt-exported-history.csv** — all the movies you've watched on Trakt.
+- **trakt-exported-watchlist.csv** — all the movies on your Trakt watchlist.
+
+To import them into Letterboxd, go to [letterboxd.com/import](https://letterboxd.com/import/) and upload the files there.
+
+## Need help?
+
+If you need more help running Python scripts, check these guides: [Windows](https://docs.python.org/3/faq/windows.html) and [MacOS](https://docs.python.org/3/using/mac.html). (Folks on Linux, you should already know what you're doing!). If nothing works, please feel free to raise a GitHub issue and I will try my best to guide you.
+
+## Note
+The script has now been updated to the new Trakt API spec (2026) and everything works as expected.
